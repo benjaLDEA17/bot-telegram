@@ -1,0 +1,58 @@
+from flask import Flask, request
+from telegram import Bot, Update
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+import sqlite3
+import dateparser
+import asyncio
+import os
+
+TOKEN = os.getenv("BOT_TOKEN")
+
+app = Flask(__name__)
+bot = Bot(token=TOKEN)
+
+conn = sqlite3.connect("agenda.db", check_same_thread=False)
+cursor = conn.cursor()
+
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS eventos (
+    id INTEGER PRIMARY KEY,
+    texto TEXT,
+    fecha TEXT
+)
+""")
+conn.commit()
+
+async def agregar(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    texto = update.message.text
+    fecha = dateparser.parse(texto)
+
+    cursor.execute("INSERT INTO eventos (texto, fecha) VALUES (?, ?)", (texto, str(fecha)))
+    conn.commit()
+
+    await update.message.reply_text("Guardado")
+
+async def ver(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    cursor.execute("SELECT texto, fecha FROM eventos")
+    datos = cursor.fetchall()
+
+    if not datos:
+        await update.message.reply_text("Nada guardado")
+        return
+
+    respuesta = "\n".join([f"{t} - {f}" for t, f in datos])
+    await update.message.reply_text(respuesta)
+
+application = ApplicationBuilder().token(TOKEN).build()
+application.add_handler(CommandHandler("agregar", agregar))
+application.add_handler(CommandHandler("ver", ver))
+
+@app.route(f"/{TOKEN}", methods=["POST"])
+def webhook():
+    update = Update.de_json(request.get_json(force=True), bot)
+    asyncio.run(application.process_update(update))
+    return "ok"
+
+@app.route("/")
+def home():
+    return "Bot activo"
